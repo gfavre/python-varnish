@@ -4,6 +4,7 @@ Simple Python interface for the Varnish management port.
 from telnetlib import Telnet
 from threading import Thread
 import logging
+import hashlib 
 
 logging.basicConfig(
     level = logging.DEBUG,
@@ -16,6 +17,17 @@ class VarnishHandler(Telnet):
             host_port_timeout = host_port_timeout.split(':')
         self.secret = opts.get('secret', None)
         Telnet.__init__(self, *host_port_timeout)
+        # Read first response from Varnish
+        (status, length), content = map(int, self.read_until('\n').strip().split()), ''
+        while len(content) < length:
+            content += self.read_until('\n')
+        self.read_until('\n')
+        if status == 107:
+            # Authenticate before continuing.
+            m = hashlib.sha256()
+            challenge = content[:32]
+            m.update(challenge + '\n' + self.secret + '\n' + challenge + '\n')
+            self.fetch('auth ' + m.hexdigest())
         
     def quit(self): self.close()
         
@@ -26,11 +38,12 @@ class VarnishHandler(Telnet):
         """
         logging.debug('SENT: %s: %s' % (self.host, command))
         self.write('%s\n' % command)
-        (status, length), content = map(int, self.read_until('\n').split()), ''
+        (status, length), content = map(int, self.read_until('\n').strip().split()), ''
         assert status == 200, 'Bad response code: %s %s' % (status, self.read_until('\n').rstrip())
         while len(content) < length:
             content += self.read_until('\n')
-        logging.debug('RECV: %s: %dB %s' % (status,length,content[:30]))
+        self.read_until('\n')
+        logging.debug('RECV: %s: %dB %s' % (status,length,content))
         return (status, length), content
         
     # Service control methods
@@ -141,8 +154,8 @@ class VarnishManager(object):
             print 'WARNING: No servers found, please declare some'
         self.servers = servers
             
-    def run(self, *commands, **kwargs):
-        if kwargs.pop('threaded', False):
+    def run(self, *commands, **opts):
+        if opts.pop('threaded', False):
             [ThreadedRunner(server, *commands, **opts).start() for server in self.servers]
         else:                
             return [run(server, *commands, **opts) for server in self.servers]
