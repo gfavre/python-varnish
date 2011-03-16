@@ -160,7 +160,7 @@ class VarnishManager(object):
         else:                
             return [run(server, *commands, **opts) for server in self.servers]
 
-    def help(self, *args): return run(self.servers[0], *('help',)+args)[0]
+    def help(self, *args, **opts): return run(self.servers[0], *('help',)+args, **opts)[0]
 
     def close(self):
         self.run('close', threaded=True)
